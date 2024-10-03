@@ -66,18 +66,17 @@ def predict_winner(home_team_stats, away_team_stats):
     
     def calculate_score(team_stats):
         score = 0
-        form = team_stats.get('form')
+        form = team_stats.get('form', '')
         fixtures = team_stats.get('fixtures', {})
         goals = team_stats.get('goals', {})
         lineups = team_stats.get('lineups', [])
         
         # Recent form: W/D/L
         recent_form = form.replace('W', '3 ').replace('D', '1 ').replace('L', '-1 ').split()
-        recent_score = sum([int(x) for x in recent_form])
+        recent_score = sum([int(x) for x in recent_form]) if recent_form else 0
         score += recent_score
         
         # Total wins, draws, loses
-        played = fixtures.get('played', {}).get('total', 0)
         wins = fixtures.get('wins', {}).get('total', 0)
         draws = fixtures.get('draws', {}).get('total', 0)
         loses = fixtures.get('loses', {}).get('total', 0)
@@ -87,8 +86,6 @@ def predict_winner(home_team_stats, away_team_stats):
         goals_for = goals.get('for', {}).get('total', {}).get('total', 0)
         goals_against = goals.get('against', {}).get('total', {}).get('total', 0)
         score += (goals_for * scoring_factors['goals_for'] + goals_against * scoring_factors['goals_against'])
-        
-        # Average player rating could be added if available
         
         return score
     
@@ -108,25 +105,40 @@ def main():
     # Prompt for date input
     date_str = input("Enter the date (YYYY-MM-DD) to get matches (leave blank for today): ") or datetime.today().strftime('%Y-%m-%d')
 
-    # Get leagues and find the league ID for UEFA Champions League
+    # Get leagues
     leagues = get_leagues()
-    ucl_league_id = None
+
+    # Prompt user for league selection
+    print("\nAvailable Leagues:")
+    league_options = []
     for league_info in leagues:
         league = league_info['league']
-        if league['name'] == 'UEFA Champions League':
-            ucl_league_id = league['id']
-            print(f"Found UEFA Champions League with ID: {ucl_league_id}")
-            break
+        country = league_info['country']
+        league_options.append({
+            'id': league['id'],
+            'name': league['name'],
+            'country': country['name']
+        })
+        print(f"{league['id']}: {league['name']} ({country['name']})")
 
-    if not ucl_league_id:
-        print("UEFA Champions League not found.")
+    # Ask for league ID
+    league_id_input = input("\nEnter the League ID you want to get matches for (e.g., 3 for Europa League): ")
+    try:
+        league_id = int(league_id_input)
+    except ValueError:
+        print("Invalid League ID. Please enter a numeric value.")
         return
 
-    league_id = ucl_league_id
+    # Check if the league ID exists
+    league_exists = any(league['id'] == league_id for league in league_options)
+    if not league_exists:
+        print("League ID not found.")
+        return
+
     season = datetime.strptime(date_str, '%Y-%m-%d').year
     matches = get_matches(league_id, date_str)
     if not matches:
-        print(f"No matches found for {date_str}.")
+        print(f"No matches found for {date_str} in the selected league.")
         return
 
     for match in matches:
