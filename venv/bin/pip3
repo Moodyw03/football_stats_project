@@ -1,5 +1,5 @@
 #!/bin/sh
-'''exec' "/Users/gabrielpereira/Documents/CODING PROJECTS GABBI/football_stats_project/venv/bin/python" "$0" "$@"
+'''exec' "/Users/gabrielpereira/Documents/CODING PROJECTS GABBI/football_stats_project/venv/bin/python3.13" "$0" "$@"
 ' '''
 # -*- coding: utf-8 -*-
 import re
