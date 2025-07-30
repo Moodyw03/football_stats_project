@@ -2,10 +2,19 @@ import os
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
+import re
+import sys
 
 # Load environment variables from .env file
 load_dotenv()
 API_KEY = os.getenv('API_FOOTBALL_KEY')
+
+# Validate API key exists
+if not API_KEY:
+    print("❌ ERROR: API_FOOTBALL_KEY not found in environment variables.")
+    print("Please create a .env file with your RapidAPI key:")
+    print("API_FOOTBALL_KEY=your_api_key_here")
+    sys.exit(1)
 
 # Base URL and headers for RapidAPI
 BASE_URL = 'https://api-football-v1.p.rapidapi.com/v3'
@@ -15,11 +24,49 @@ headers = {
     'x-rapidapi-key': API_KEY
 }
 
+def validate_date(date_str):
+    """Validate date format and range"""
+    try:
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        # Check if date is not in the future
+        if date_obj > datetime.now():
+            return False, "Date cannot be in the future"
+        # Check if date is not too far in the past (e.g., 10 years ago)
+        if date_obj < datetime(2014, 1, 1):
+            return False, "Date too far in the past"
+        return True, date_obj
+    except ValueError:
+        return False, "Invalid date format. Use YYYY-MM-DD"
+
+def validate_league_id(league_id_str):
+    """Validate league ID input"""
+    try:
+        league_id = int(league_id_str)
+        if league_id <= 0:
+            return False, "League ID must be a positive number"
+        return True, league_id
+    except ValueError:
+        return False, "League ID must be a number"
+
+def safe_api_call(url, headers, params=None):
+    """Make API calls with error handling"""
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Error: {e}")
+        return None
+    except ValueError as e:
+        print(f"❌ JSON Parse Error: {e}")
+        return None
+
 def get_leagues():
     url = f'{BASE_URL}/leagues'
-    response = requests.get(url, headers=headers)
-    data = response.json()
-    return data.get('response', [])
+    data = safe_api_call(url, headers)
+    if data:
+        return data.get('response', [])
+    return []
 
 def get_matches(league_id, date_str):
     date_obj = datetime.strptime(date_str, '%Y-%m-%d')
@@ -30,18 +77,20 @@ def get_matches(league_id, date_str):
         'season': season,
         'date': date_str
     }
-    response = requests.get(url, headers=headers, params=params)
-    data = response.json()
-    return data.get('response', [])
+    data = safe_api_call(url, headers, params)
+    if data:
+        return data.get('response', [])
+    return []
 
 def get_match_stats(fixture_id):
     url = f'{BASE_URL}/fixtures/statistics'
     params = {
         'fixture': fixture_id
     }
-    response = requests.get(url, headers=headers, params=params)
-    data = response.json()
-    return data.get('response', [])
+    data = safe_api_call(url, headers, params)
+    if data:
+        return data.get('response', [])
+    return []
 
 def get_team_form(team_id, league_id, season):
     url = f'{BASE_URL}/teams/statistics'
@@ -50,9 +99,10 @@ def get_team_form(team_id, league_id, season):
         'league': league_id,
         'season': season
     }
-    response = requests.get(url, headers=headers, params=params)
-    data = response.json()
-    return data.get('response', {})
+    data = safe_api_call(url, headers, params)
+    if data:
+        return data.get('response', {})
+    return {}
 
 def predict_winner(home_team_stats, away_team_stats):
     # Simple scoring based on key statistics
@@ -102,14 +152,32 @@ def predict_winner(home_team_stats, away_team_stats):
     return prediction
 
 def main():
-    # Prompt for date input
-    date_str = input("Enter the date (YYYY-MM-DD) to get matches (leave blank for today): ") or datetime.today().strftime('%Y-%m-%d')
+    print("⚽ Football Stats Project")
+    print("=" * 40)
+    
+    # Prompt for date input with validation
+    while True:
+        date_str = input("Enter the date (YYYY-MM-DD) to get matches (leave blank for today): ").strip()
+        if not date_str:
+            date_str = datetime.today().strftime('%Y-%m-%d')
+        
+        is_valid, result = validate_date(date_str)
+        if is_valid:
+            break
+        else:
+            print(f"❌ {result}")
+            continue
 
     # Get leagues
+    print("📡 Fetching available leagues...")
     leagues = get_leagues()
+    
+    if not leagues:
+        print("❌ Failed to fetch leagues. Please check your API key and internet connection.")
+        return
 
     # Prompt user for league selection
-    print("\nAvailable Leagues:")
+    print("\n📋 Available Leagues:")
     league_options = []
     for league_info in leagues:
         league = league_info['league']
@@ -121,56 +189,65 @@ def main():
         })
         print(f"{league['id']}: {league['name']} ({country['name']})")
 
-    # Ask for league ID
-    league_id_input = input("\nEnter the League ID you want to get matches for (e.g., 3 for Europa League): ")
-    try:
-        league_id = int(league_id_input)
-    except ValueError:
-        print("Invalid League ID. Please enter a numeric value.")
-        return
+    # Ask for league ID with validation
+    while True:
+        league_id_input = input("\nEnter the League ID you want to get matches for: ").strip()
+        is_valid, result = validate_league_id(league_id_input)
+        if is_valid:
+            league_id = result
+            break
+        else:
+            print(f"❌ {result}")
+            continue
 
     # Check if the league ID exists
     league_exists = any(league['id'] == league_id for league in league_options)
     if not league_exists:
-        print("League ID not found.")
+        print("❌ League ID not found in the available leagues.")
         return
 
+    print(f"📊 Fetching matches for {date_str}...")
     season = datetime.strptime(date_str, '%Y-%m-%d').year
     matches = get_matches(league_id, date_str)
+    
     if not matches:
-        print(f"No matches found for {date_str} in the selected league.")
+        print(f"❌ No matches found for {date_str} in the selected league.")
         return
 
-    for match in matches:
+    print(f"✅ Found {len(matches)} match(es)")
+    
+    for i, match in enumerate(matches, 1):
         fixture = match['fixture']
         teams = match['teams']
         fixture_id = fixture['id']
         home_team = teams['home']
         away_team = teams['away']
-        print(f'\nMatch: {home_team["name"]} vs {away_team["name"]}')
+        
+        print(f'\n🏆 Match {i}: {home_team["name"]} vs {away_team["name"]}')
 
         # Get statistics for the match
         stats = get_match_stats(fixture_id)
         if not stats:
-            print("No statistics available for this match yet.")
+            print("   📊 No statistics available for this match yet.")
         else:
             for team_stats in stats:
                 team_name = team_stats['team']['name']
-                print(f'\nStatistics for {team_name}:')
+                print(f'\n   📊 Statistics for {team_name}:')
                 for stat in team_stats['statistics']:
                     stat_type = stat['type']
                     stat_value = stat['value'] if stat['value'] is not None else 'N/A'
-                    print(f'  {stat_type}: {stat_value}')
+                    print(f'     • {stat_type}: {stat_value}')
 
         # Get team forms
+        print("   🔍 Analyzing team forms...")
         home_team_stats = get_team_form(home_team['id'], league_id, season)
         away_team_stats = get_team_form(away_team['id'], league_id, season)
 
         if home_team_stats and away_team_stats:
             prediction = predict_winner(home_team_stats, away_team_stats)
-            print(f'\nPrediction: {prediction}')
+            print(f'   🎯 Prediction: {prediction}')
         else:
-            print("Team statistics not available for prediction.")
+            print("   ❌ Team statistics not available for prediction.")
 
 if __name__ == '__main__':
     main()
